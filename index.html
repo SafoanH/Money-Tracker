@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Money Tracker</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      label { display:block; margin-top: 10px; }
+      input, button { padding: 8px; font-size: 14px; }
+      #money { font-size: 40px; margin: 20px 0; }
+      .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+      .box { border: 1px solid #ddd; padding: 12px; border-radius: 10px; margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1 id="money">$0.00</h1>
+
+    <div class="row">
+      <button onclick="start()">Start</button>
+      <button onclick="stop()">Stop</button>
+    </div>
+
+    <div class="box">
+      <h2>Testing Controls</h2>
+
+      <div class="row">
+        <label>
+          <input id="useManual" type="checkbox" />
+          Use manual time (override system clock)
+        </label>
+      </div>
+
+      <div class="row">
+        <label>
+          Work start (HH:MM)
+          <input id="workStart" type="time" value="08:00" step="60" />
+        </label>
+
+        <label>
+          Work end (HH:MM)
+          <input id="workEnd" type="time" value="14:20" step="60" />
+        </label>
+
+        <label>
+          Manual “now” (HH:MM)
+          <input id="manualNow" type="time" value="08:00" step="60" />
+        </label>
+
+        <button onclick="updateManualOnce()">Update Once</button>
+      </div>
+
+      <p id="status"></p>
+    </div>
+
+    <script src="app code1.js"></script>
+  </body>
+</html>
