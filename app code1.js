@@ -1,133 +1,402 @@
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+/** ===========================
+ *  SUPABASE CONFIG (YOUR VALUES)
+ *  =========================== */
+const SUPABASE_URL = "https://zbiutjrfcpzfndvwosfe.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_8xY3RQcA_JXtBH36iLQpUQ_Yr2ROeey";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/** ===========================
+ *  PAY RATE
+ *  =========================== */
 const HOURLY_RATE = 25.26;
 const RATE_PER_SECOND = HOURLY_RATE / 3600;
 
-let startTime = null;     // Date object in the chosen clock (real or manual)
-let interval = null;
+/** ===========================
+ *  STATE
+ *  =========================== */
+let intervalId = null;
+let currentUser = null;
 
-let manualNowDate = null; // internal manual "now" Date, ticks forward when running
+let state = {
+  running: false,
+  useManual: false,
+  startTimeMs: null,   // timestamp (ms)
+  manualNowMs: null,   // timestamp (ms)
+};
 
-function setMoney(amount) {
-  document.getElementById("money").innerText = "$" + amount.toFixed(2);
+// save to cloud every N seconds while running (avoid spam)
+let cloudSaveCounter = 0;
+const CLOUD_SAVE_EVERY_SECONDS = 30;
+
+/** ===========================
+ *  DOM HELPERS
+ *  =========================== */
+const $ = (id) => document.getElementById(id);
+
+function setMoney(val) {
+  $("money").innerText = "$" + val.toFixed(2);
+}
+function setStatus(msg) {
+  $("status").innerText = msg;
+}
+function setAuthStatus(msg) {
+  $("authStatus").innerText = msg;
+}
+function showAuthGate() {
+  $("authGate").style.display = "block";
+  $("trackerApp").style.display = "none";
+}
+function showTracker() {
+  $("authGate").style.display = "none";
+  $("trackerApp").style.display = "block";
 }
 
-function getTodayAt(timeStr) {
-  const [h, m] = timeStr.split(":").map(Number);
+/** ===========================
+ *  TIME HELPERS
+ *  =========================== */
+// input value from <input type="time"> is always "HH:MM" or "HH:MM:SS" (24-hour)
+function timeStrToMs(str) {
+  const parts = (str || "00:00:00").split(":").map(Number);
+  const h = parts[0] ?? 0;
+  const m = parts[1] ?? 0;
+  const s = parts[2] ?? 0;
+
   const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d;
+  d.setHours(h, m, s, 0);
+  return d.getTime();
 }
 
-function getWorkStart() {
-  return getTodayAt(document.getElementById("workStart").value);
+function msToTimeStr(ms) {
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
 
-function getWorkEnd() {
-  return getTodayAt(document.getElementById("workEnd").value);
+function getWorkEndMs() {
+  const d = new Date();
+  d.setHours(14, 20, 0, 0); // 2:20 PM
+  return d.getTime();
 }
 
-function usingManual() {
-  return document.getElementById("useManual").checked;
-}
-
-function getNow() {
-  // If manual mode, return the ticking manual date; otherwise real current time
-  if (!usingManual()) return new Date();
-
-  // If manual date isn't initialized yet, init from the input
-  if (!manualNowDate) {
-    manualNowDate = getTodayAt(document.getElementById("manualNow").value);
+function nowMs() {
+  if (!state.useManual) return Date.now();
+  if (state.manualNowMs == null) {
+    state.manualNowMs = timeStrToMs($("manualNow").value);
   }
-  return new Date(manualNowDate);
+  return state.manualNowMs;
 }
 
-function isWithinWorkHours(now) {
-  const start = getWorkStart();
-  const end = getWorkEnd();
-  return now >= start && now < end;
+function computeEarned(now) {
+  if (!state.startTimeMs) return 0;
+  const end = getWorkEndMs();
+  const effectiveNow = Math.min(now, end);
+  const elapsedSeconds = (effectiveNow - state.startTimeMs) / 1000;
+  return Math.max(0, elapsedSeconds) * RATE_PER_SECOND;
 }
 
-function start() {
-  if (interval) return; // prevent double start
+/** ===========================
+ *  SUPABASE STORAGE
+ *  Table: tracker_state(user_id uuid pk, state jsonb, updated_at timestamptz)
+ *  =========================== */
+async function loadCloudState() {
+  if (!currentUser) return false;
 
-  // Initialize manualNowDate from input when manual mode is ON
-  if (usingManual()) {
-    manualNowDate = getTodayAt(document.getElementById("manualNow").value);
+  const { data, error } = await supabase
+    .from("tracker_state")
+    .select("state")
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("loadCloudState:", error.message);
+    return false;
   }
 
-  const now = getNow();
+  if (data?.state) {
+    state = { ...state, ...data.state };
+    return true;
+  }
+  return false;
+}
 
-  if (!isWithinWorkHours(now)) {
-    document.getElementById("status").innerText =
-      "Outside work hours for the CURRENT clock (manual or real). Adjust your manual time/start/end.";
-    alert("Outside work hours");
+async function saveCloudState() {
+  if (!currentUser) return;
+
+  const { error } = await supabase
+    .from("tracker_state")
+    .upsert({
+      user_id: currentUser.id,
+      state,
+      updated_at: new Date().toISOString(),
+    });
+
+  if (error) console.warn("saveCloudState:", error.message);
+}
+
+/** ===========================
+ *  RESTORE + RENDER
+ *  =========================== */
+function syncUIFromState() {
+  $("useManual").checked = !!state.useManual;
+
+  if (state.useManual) {
+    // If we have a saved manual time, show it; else keep the input value
+    if (state.manualNowMs != null) $("manualNow").value = msToTimeStr(state.manualNowMs);
+  }
+}
+
+async function restoreAndRender() {
+  syncUIFromState();
+
+  const end = getWorkEndMs();
+  const current = nowMs();
+
+  // If already past end: freeze and stop
+  if (state.startTimeMs && current >= end) {
+    state.running = false;
+    if (state.useManual) state.manualNowMs = end;
+
+    setMoney(computeEarned(end));
+    setStatus("Workday ended at 2:20 PM — final saved.");
+    stopInterval();
+    await saveCloudState();
     return;
   }
 
-  // startTime should be the "now" in the chosen clock
-  startTime = now;
+  // Normal render
+  setMoney(computeEarned(current));
+  setStatus(state.running ? "RUNNING" : "Ready.");
 
-  interval = setInterval(() => {
-    // Tick manual time forward by 1 second if manual mode is ON
-    if (usingManual() && manualNowDate) {
-      manualNowDate = new Date(manualNowDate.getTime() + 1000);
+  if (state.running) startInterval();
+  else stopInterval();
+}
 
-      // Keep the manual input field roughly in sync (minutes only)
-      const hh = String(manualNowDate.getHours()).padStart(2, "0");
-      const mm = String(manualNowDate.getMinutes()).padStart(2, "0");
-      document.getElementById("manualNow").value = `${hh}:${mm}`;
-    }
+/** ===========================
+ *  INTERVAL / TICK
+ *  =========================== */
+function startInterval() {
+  if (intervalId) return;
+  intervalId = setInterval(tick, 1000);
+}
 
-    const nowTick = getNow();
-    const end = getWorkEnd();
+function stopInterval() {
+  if (!intervalId) return;
+  clearInterval(intervalId);
+  intervalId = null;
+}
 
-    if (nowTick >= end) {
-      stop();
-      document.getElementById("status").innerText = "Reached end time — stopped.";
+async function finalizeAtEnd(end) {
+  state.running = false;
+  if (state.useManual) state.manualNowMs = end;
+
+  setMoney(computeEarned(end));
+  setStatus("Workday ended at 2:20 PM — final saved.");
+  stopInterval();
+
+  await saveCloudState();
+}
+
+function tick() {
+  if (!currentUser || !state.running) return;
+
+  const end = getWorkEndMs();
+
+  // Advance manual clock by 1 sec if in manual mode
+  if (state.useManual) {
+    state.manualNowMs = nowMs() + 1000;
+    $("manualNow").value = msToTimeStr(state.manualNowMs);
+  }
+
+  const current = nowMs();
+
+  // Hard stop at 2:20 PM
+  if (current >= end) {
+    finalizeAtEnd(end);
+    return;
+  }
+
+  setMoney(computeEarned(current));
+  setStatus("RUNNING");
+
+  cloudSaveCounter++;
+  if (cloudSaveCounter >= CLOUD_SAVE_EVERY_SECONDS) {
+    cloudSaveCounter = 0;
+    saveCloudState();
+  }
+}
+
+/** ===========================
+ *  TRACKER CONTROLS (AUTH REQUIRED)
+ *  =========================== */
+window.start = async function start() {
+  if (!currentUser) return;
+
+  state.useManual = $("useManual").checked;
+
+  if (state.useManual) {
+    state.manualNowMs = timeStrToMs($("manualNow").value || "08:00:00");
+  } else {
+    state.manualNowMs = null;
+  }
+
+  const current = nowMs();
+  const end = getWorkEndMs();
+
+  if (current >= end) {
+    await finalizeAtEnd(end);
+    return;
+  }
+
+  state.running = true;
+  state.startTimeMs = current;
+
+  cloudSaveCounter = 0;
+  await saveCloudState();
+
+  await restoreAndRender();
+};
+
+window.stop = async function stop() {
+  if (!currentUser) return;
+
+  state.running = false;
+  stopInterval();
+  setStatus("Stopped.");
+  await saveCloudState();
+};
+
+window.resetAll = async function resetAll() {
+  if (!currentUser) return;
+
+  stopInterval();
+  cloudSaveCounter = 0;
+
+  state = {
+    running: false,
+    useManual: false,
+    startTimeMs: null,
+    manualNowMs: null,
+  };
+
+  $("useManual").checked = false;
+  $("manualNow").value = "08:00:00";
+
+  setMoney(0);
+  setStatus("Reset.");
+  await saveCloudState();
+};
+
+window.applyManualNow = async function applyManualNow() {
+  if (!currentUser) return;
+
+  if (!$("useManual").checked) {
+    setStatus("Enable manual time first.");
+    return;
+  }
+
+  state.useManual = true;
+  state.manualNowMs = timeStrToMs($("manualNow").value || "08:00:00");
+
+  const end = getWorkEndMs();
+  if (state.manualNowMs >= end) {
+    state.manualNowMs = end;
+    $("manualNow").value = msToTimeStr(end);
+
+    if (state.running) {
+      await finalizeAtEnd(end);
       return;
     }
+  }
 
-    const elapsedSeconds = (nowTick - startTime) / 1000;
-    const earned = elapsedSeconds * RATE_PER_SECOND;
+  setMoney(computeEarned(nowMs()));
+  setStatus("Manual time applied.");
+  await saveCloudState();
+};
 
-    setMoney(earned);
+/** ===========================
+ *  AUTH
+ *  =========================== */
+window.signUp = async function signUp() {
+  const email = ($("email").value || "").trim();
+  const password = $("password").value || "";
 
-    document.getElementById("status").innerText =
-      usingManual()
-        ? `Running in MANUAL mode (now = ${nowTick.toLocaleTimeString()})`
-        : `Running in REAL TIME mode (now = ${nowTick.toLocaleTimeString()})`;
-  }, 1000);
-}
-
-function stop() {
-  if (interval) clearInterval(interval);
-  interval = null;
-}
-
-function updateManualOnce() {
-  // One-off calculation without running
-  stop();
-
-  if (!usingManual()) {
-    document.getElementById("status").innerText =
-      "Turn on 'Use manual time' first to test with manual values.";
+  const { error } = await supabase.auth.signUp({ email, password });
+  if (error) {
+    setAuthStatus("Sign up error: " + error.message);
     return;
   }
 
-  manualNowDate = getTodayAt(document.getElementById("manualNow").value);
+  setAuthStatus("Signed up! Now sign in.");
+};
 
-  const start = getWorkStart();
-  const end = getWorkEnd();
-  const now = getNow();
+window.signIn = async function signIn() {
+  const email = ($("email").value || "").trim();
+  const password = $("password").value || "";
 
-  const clampedNow = new Date(
-    Math.min(Math.max(now.getTime(), start.getTime()), end.getTime())
-  );
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    setAuthStatus("Sign in error: " + error.message);
+    return;
+  }
 
-  const elapsedSeconds = Math.max(0, (clampedNow - start) / 1000);
-  const earned = elapsedSeconds * RATE_PER_SECOND;
+  currentUser = data.user;
+  setAuthStatus("Signed in as: " + currentUser.email);
 
-  setMoney(earned);
+  showTracker();
 
-  document.getElementById("status").innerText =
-    `Manual one-off: start=${start.toLocaleTimeString()} now=${now.toLocaleTimeString()} end=${end.toLocaleTimeString()}`;
-}
+  await loadCloudState();
+  await restoreAndRender();
+};
+
+window.signOut = async function signOut() {
+  await supabase.auth.signOut();
+
+  currentUser = null;
+  stopInterval();
+  intervalId = null;
+
+  showAuthGate();
+  setAuthStatus("Not signed in.");
+};
+
+/** ===========================
+ *  INIT
+ *  =========================== */
+document.addEventListener("DOMContentLoaded", async () => {
+  // existing session?
+  const { data } = await supabase.auth.getUser();
+
+  if (data?.user) {
+    currentUser = data.user;
+    setAuthStatus("Signed in as: " + currentUser.email);
+    showTracker();
+
+    await loadCloudState();
+    await restoreAndRender();
+  } else {
+    currentUser = null;
+    showAuthGate();
+    setAuthStatus("Not signed in.");
+  }
+
+  // auth changes
+  supabase.auth.onAuthStateChange(async (_event, session) => {
+    if (session?.user) {
+      currentUser = session.user;
+      setAuthStatus("Signed in as: " + currentUser.email);
+      showTracker();
+
+      await loadCloudState();
+      await restoreAndRender();
+    } else {
+      currentUser = null;
+      stopInterval();
+      showAuthGate();
+      setAuthStatus("Not signed in.");
+    }
+  });
+});
