@@ -76,6 +76,15 @@ function msToTimeStr(ms) {
   return `${hh}:${mm}:${ss}`;
 }
 
+// YYYY-MM-DD (local)
+function todayKey() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function getWorkEndMs() {
   const d = new Date();
   d.setHours(14, 20, 0, 0); // 2:20 PM
@@ -99,8 +108,7 @@ function computeEarned(now) {
 }
 
 /** ===========================
- *  SUPABASE STORAGE
- *  Table: tracker_state(user_id uuid pk, state jsonb, updated_at timestamptz)
+ *  SUPABASE STORAGE: tracker_state
  *  =========================== */
 async function loadCloudState() {
   if (!currentUser) return false;
@@ -138,13 +146,104 @@ async function saveCloudState() {
 }
 
 /** ===========================
+ *  SUPABASE STORAGE: earnings_log (daily totals)
+ *  =========================== */
+async function upsertDailyTotal(totalEarned) {
+  if (!currentUser) return;
+
+  const work_date = todayKey();
+  const rounded = Number(totalEarned.toFixed(2));
+
+  const { error } = await supabase
+    .from("earnings_log")
+    .upsert({
+      user_id: currentUser.id,
+      work_date,
+      total_earned: rounded,
+      updated_at: new Date().toISOString(),
+    });
+
+  if (error) console.warn("upsertDailyTotal:", error.message);
+}
+
+/** ===========================
+ *  HISTORY DRAWER UI + QUERIES
+ *  =========================== */
+window.toggleHistory = function toggleHistory() {
+  const drawer = $("historyDrawer");
+  const open = drawer.classList.toggle("open");
+  drawer.setAttribute("aria-hidden", String(!open));
+
+  // load history when opened
+  if (open) refreshHistory();
+};
+
+window.refreshHistory = async function refreshHistory() {
+  if (!currentUser) return;
+
+  const list = $("historyList");
+  list.innerHTML = `<div class="muted">Loading…</div>`;
+
+  const { data, error } = await supabase
+    .from("earnings_log")
+    .select("work_date,total_earned")
+    .eq("user_id", currentUser.id)
+    .order("work_date", { ascending: false });
+
+  if (error) {
+    list.innerHTML = `<div class="muted">Error loading history: ${error.message}</div>`;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    list.innerHTML = `<div class="muted">No data yet.</div>`;
+    $("historyTotalValue").innerText = "$0.00";
+    return;
+  }
+
+  let totalAll = 0;
+  list.innerHTML = "";
+
+  for (const row of data) {
+    const dateStr = row.work_date; // YYYY-MM-DD
+    const amt = Number(row.total_earned || 0);
+    totalAll += amt;
+
+    const div = document.createElement("div");
+    div.className = "histRow";
+    div.innerHTML = `<span>${dateStr}</span><span>$${amt.toFixed(2)}</span>`;
+    list.appendChild(div);
+  }
+
+  $("historyTotalValue").innerText = "$" + totalAll.toFixed(2);
+};
+
+window.resetHistory = async function resetHistory() {
+  if (!currentUser) return;
+
+  const ok = confirm("Reset ALL saved history for your account? This cannot be undone.");
+  if (!ok) return;
+
+  const { error } = await supabase
+    .from("earnings_log")
+    .delete()
+    .eq("user_id", currentUser.id);
+
+  if (error) {
+    alert("Could not reset history: " + error.message);
+    return;
+  }
+
+  await refreshHistory();
+};
+
+/** ===========================
  *  RESTORE + RENDER
  *  =========================== */
 function syncUIFromState() {
   $("useManual").checked = !!state.useManual;
 
   if (state.useManual) {
-    // If we have a saved manual time, show it; else keep the input value
     if (state.manualNowMs != null) $("manualNow").value = msToTimeStr(state.manualNowMs);
   }
 }
@@ -160,10 +259,13 @@ async function restoreAndRender() {
     state.running = false;
     if (state.useManual) state.manualNowMs = end;
 
-    setMoney(computeEarned(end));
+    const finalEarned = computeEarned(end);
+    setMoney(finalEarned);
     setStatus("Workday ended at 2:20 PM — final saved.");
+
     stopInterval();
     await saveCloudState();
+    await upsertDailyTotal(finalEarned);   // ✅ save daily total
     return;
   }
 
@@ -193,11 +295,13 @@ async function finalizeAtEnd(end) {
   state.running = false;
   if (state.useManual) state.manualNowMs = end;
 
-  setMoney(computeEarned(end));
+  const finalEarned = computeEarned(end);
+  setMoney(finalEarned);
   setStatus("Workday ended at 2:20 PM — final saved.");
   stopInterval();
 
   await saveCloudState();
+  await upsertDailyTotal(finalEarned); // ✅ save daily total
 }
 
 function tick() {
@@ -265,8 +369,11 @@ window.stop = async function stop() {
 
   state.running = false;
   stopInterval();
+
+  const total = computeEarned(nowMs());
   setStatus("Stopped.");
   await saveCloudState();
+  await upsertDailyTotal(total); // ✅ save daily total on stop
 };
 
 window.resetAll = async function resetAll() {
@@ -274,6 +381,9 @@ window.resetAll = async function resetAll() {
 
   stopInterval();
   cloudSaveCounter = 0;
+
+  // also save today's total as 0 (optional)
+  await upsertDailyTotal(0);
 
   state = {
     running: false,
@@ -288,6 +398,10 @@ window.resetAll = async function resetAll() {
   setMoney(0);
   setStatus("Reset.");
   await saveCloudState();
+
+  // update drawer if open
+  const drawerOpen = $("historyDrawer").classList.contains("open");
+  if (drawerOpen) refreshHistory();
 };
 
 window.applyManualNow = async function applyManualNow() {
@@ -350,6 +464,9 @@ window.signIn = async function signIn() {
 
   await loadCloudState();
   await restoreAndRender();
+
+  // preload history
+  refreshHistory();
 };
 
 window.signOut = async function signOut() {
@@ -357,7 +474,9 @@ window.signOut = async function signOut() {
 
   currentUser = null;
   stopInterval();
-  intervalId = null;
+
+  // close drawer on sign out
+  $("historyDrawer").classList.remove("open");
 
   showAuthGate();
   setAuthStatus("Not signed in.");
@@ -392,9 +511,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       await loadCloudState();
       await restoreAndRender();
+      refreshHistory();
     } else {
       currentUser = null;
       stopInterval();
+      $("historyDrawer").classList.remove("open");
       showAuthGate();
       setAuthStatus("Not signed in.");
     }
