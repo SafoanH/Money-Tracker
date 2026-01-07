@@ -10,7 +10,7 @@
       font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,Arial,sans-serif;
       background:#f6f7fb;
       padding:24px;
-      max-width:620px;
+      max-width:740px;
       margin:auto;
       color:#111;
     }
@@ -85,6 +85,81 @@
     /* Auth gating */
     #trackerApp{ display:none; }
     #authGate{ display:block; }
+
+    /* Right-side history drawer */
+    #historyBtn{
+      position:fixed;
+      right:16px;
+      top:140px;
+      z-index:999;
+      border-radius:999px;
+      padding:10px 14px;
+      box-shadow:0 6px 18px rgba(0,0,0,.12);
+      background:#111827;
+      color:#fff;
+      font-weight:700;
+    }
+
+    #historyDrawer{
+      position:fixed;
+      top:0;
+      right:0;
+      height:100vh;
+      width:340px;
+      background:#fff;
+      box-shadow:-12px 0 30px rgba(0,0,0,.12);
+      padding:16px;
+      transform:translateX(105%);
+      transition:transform .2s ease;
+      z-index:1000;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    #historyDrawer.open{ transform:translateX(0); }
+
+    .drawerHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .drawerTitle{
+      font-size:16px;
+      font-weight:900;
+      margin:0;
+    }
+
+    #historyList{
+      overflow:auto;
+      flex:1;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:10px;
+      background:#fafafa;
+    }
+
+    .histRow{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      padding:10px 8px;
+      border-bottom:1px solid #e5e7eb;
+      font-size:14px;
+    }
+    .histRow:last-child{ border-bottom:none; }
+
+    .muted{ color:#6b7280; font-size:12px; }
+
+    #historyTotal{
+      font-weight:800;
+      font-size:14px;
+      display:flex;
+      justify-content:space-between;
+      padding:8px 2px 0;
+    }
   </style>
 </head>
 
@@ -113,6 +188,8 @@
 
   <!-- TRACKER APP -->
   <div id="trackerApp">
+    <button id="historyBtn" onclick="toggleHistory()">History ▸</button>
+
     <div id="money">$0.00</div>
 
     <div class="box">
@@ -146,4 +223,40 @@
         <button class="secondary" onclick="applyManualNow()">Apply</button>
       </div>
 
-      <div c
+      <div class="tiny">
+        Manual mode is for testing. When running, it ticks forward 1 second per second.
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY DRAWER -->
+  <div id="historyDrawer" aria-hidden="true">
+    <div class="drawerHeader">
+      <h3 class="drawerTitle">Earnings History</h3>
+      <button class="secondary" onclick="toggleHistory()">Close</button>
+    </div>
+
+    <div class="row">
+      <button class="secondary" onclick="refreshHistory()">Refresh</button>
+      <button class="danger" onclick="resetHistory()">Reset History</button>
+    </div>
+
+    <div class="muted">Dates you tracked + total earned (saved in Supabase).</div>
+
+    <div id="historyList">
+      <div class="muted">No data yet.</div>
+    </div>
+
+    <div id="historyTotal">
+      <span>All-time total</span>
+      <span id="historyTotalValue">$0.00</span>
+    </div>
+  </div>
+
+  <footer>
+    Cloud-synced with Supabase · Refresh/crash safe · Hard stop at 2:20 PM
+  </footer>
+
+  <script type="module" src="./app-code1.js?v=3"></script>
+</body>
+</html>
