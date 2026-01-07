@@ -1,57 +1,149 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Money Tracker</title>
-    <style>
-      body { font-family: Arial, sans-serif; padding: 20px; }
-      label { display:block; margin-top: 10px; }
-      input, button { padding: 8px; font-size: 14px; }
-      #money { font-size: 40px; margin: 20px 0; }
-      .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-      .box { border: 1px solid #ddd; padding: 12px; border-radius: 10px; margin-top: 12px; }
-    </style>
-  </head>
-  <body>
-    <h1 id="money">$0.00</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Money Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body{
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,Arial,sans-serif;
+      background:#f6f7fb;
+      padding:24px;
+      max-width:620px;
+      margin:auto;
+      color:#111;
+    }
+    h1{ text-align:center; margin:0 0 10px; }
+
+    #money{
+      text-align:center;
+      font-size:56px;
+      font-weight:900;
+      color:#15803d;
+      margin:14px 0 18px;
+    }
+
+    .box{
+      background:#fff;
+      border-radius:14px;
+      padding:16px;
+      margin-top:16px;
+      box-shadow:0 4px 14px rgba(0,0,0,0.06);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+
+    button{
+      padding:10px 14px;
+      font-size:15px;
+      border-radius:10px;
+      border:none;
+      cursor:pointer;
+    }
+    .primary{ background:#2563eb; color:#fff; }
+    .secondary{ background:#e5e7eb; }
+    .danger{ background:#dc2626; color:#fff; }
+
+    input{
+      padding:10px;
+      font-size:14px;
+      border-radius:10px;
+      border:1px solid #d1d5db;
+      min-width:220px;
+    }
+
+    label{ font-size:14px; font-weight:600; }
+
+    #status,#authStatus{
+      margin-top:10px;
+      font-size:14px;
+      color:#444;
+      white-space:pre-wrap;
+    }
+
+    .tiny{
+      font-size:12px;
+      color:#6b7280;
+      margin-top:6px;
+      line-height:1.35;
+    }
+
+    footer{
+      margin-top:18px;
+      text-align:center;
+      font-size:12px;
+      color:#777;
+    }
+
+    /* Auth gating */
+    #trackerApp{ display:none; }
+    #authGate{ display:block; }
+  </style>
+</head>
+
+<body>
+  <h1>Money Tracker</h1>
+
+  <!-- AUTH GATE -->
+  <div id="authGate" class="box">
+    <h3>Sign in to access tracker</h3>
 
     <div class="row">
-      <button onclick="start()">Start</button>
-      <button onclick="stop()">Stop</button>
+      <input id="email" type="email" placeholder="Email" autocomplete="email" />
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
+    </div>
+
+    <div class="row">
+      <button class="primary" onclick="signUp()">Sign up</button>
+      <button class="secondary" onclick="signIn()">Sign in</button>
+    </div>
+
+    <div id="authStatus">Not signed in.</div>
+    <div class="tiny">
+      You must sign in to use the tracker. Your timer state is saved in Supabase so it restores after refresh/crash and across devices.
+    </div>
+  </div>
+
+  <!-- TRACKER APP -->
+  <div id="trackerApp">
+    <div id="money">$0.00</div>
+
+    <div class="box">
+      <div class="row">
+        <button class="primary" onclick="start()">Start</button>
+        <button class="secondary" onclick="stop()">Stop</button>
+        <button class="danger" onclick="resetAll()">Reset</button>
+        <button class="secondary" onclick="signOut()">Sign out</button>
+      </div>
+
+      <div id="status">Ready.</div>
+      <div class="tiny">Automatically stops and freezes at <b>2:20 PM</b>.</div>
     </div>
 
     <div class="box">
-      <h2>Testing Controls</h2>
+      <h3>Manual / Testing</h3>
 
       <div class="row">
         <label>
           <input id="useManual" type="checkbox" />
-          Use manual time (override system clock)
+          Use manual time
         </label>
       </div>
 
       <div class="row">
         <label>
-          Work start (HH:MM)
-          <input id="workStart" type="time" value="08:00" step="60" />
+          Manual time (HH:MM:SS)
+          <input id="manualNow" type="time" value="08:00:00" step="1" />
         </label>
 
-        <label>
-          Work end (HH:MM)
-          <input id="workEnd" type="time" value="14:20" step="60" />
-        </label>
-
-        <label>
-          Manual “now” (HH:MM)
-          <input id="manualNow" type="time" value="08:00" step="60" />
-        </label>
-
-        <button onclick="updateManualOnce()">Update Once</button>
+        <button class="secondary" onclick="applyManualNow()">Apply</button>
       </div>
 
-      <p id="status"></p>
-    </div>
-
-    <script src="app code1.js"></script>
-  </body>
-</html>
+      <div c
