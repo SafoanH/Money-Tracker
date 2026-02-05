@@ -1,8 +1,6 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-/** ===========================
- *  SUPABASE CONFIG (YOUR VALUES)
- *  =========================== */
+
 const SUPABASE_URL = "https://zbiutjrfcpzfndvwosfe.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_8xY3RQcA_JXtBH36iLQpUQ_Yr2ROeey";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -26,7 +24,7 @@ let state = {
   manualNowMs: null,   // timestamp (ms)
 };
 
-// save to cloud every N seconds while running (avoid spam)
+
 let cloudSaveCounter = 0;
 const CLOUD_SAVE_EVERY_SECONDS = 30;
 
@@ -56,7 +54,7 @@ function showTracker() {
 /** ===========================
  *  TIME HELPERS
  *  =========================== */
-// input value from <input type="time"> is always "HH:MM" or "HH:MM:SS" (24-hour)
+
 function timeStrToMs(str) {
   const parts = (str || "00:00:00").split(":").map(Number);
   const h = parts[0] ?? 0;
@@ -76,7 +74,7 @@ function msToTimeStr(ms) {
   return `${hh}:${mm}:${ss}`;
 }
 
-// YYYY-MM-DD (local)
+
 function todayKey() {
   const d = new Date();
   const y = d.getFullYear();
@@ -265,11 +263,11 @@ async function restoreAndRender() {
 
     stopInterval();
     await saveCloudState();
-    await upsertDailyTotal(finalEarned);   // ✅ save daily total
+    await upsertDailyTotal(finalEarned);   
     return;
   }
 
-  // Normal render
+  
   setMoney(computeEarned(current));
   setStatus(state.running ? "RUNNING" : "Ready.");
 
@@ -301,7 +299,7 @@ async function finalizeAtEnd(end) {
   stopInterval();
 
   await saveCloudState();
-  await upsertDailyTotal(finalEarned); // ✅ save daily total
+  await upsertDailyTotal(finalEarned); 
 }
 
 function tick() {
@@ -373,7 +371,7 @@ window.stop = async function stop() {
   const total = computeEarned(nowMs());
   setStatus("Stopped.");
   await saveCloudState();
-  await upsertDailyTotal(total); // ✅ save daily total on stop
+  await upsertDailyTotal(total); 
 };
 
 window.resetAll = async function resetAll() {
@@ -521,3 +519,4 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 });
+
